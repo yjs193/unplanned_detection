@@ -1,0 +1,9 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "work_ticket_parse_agent": "backend.agent:GRAPH"
+  },
+  "env": ".env",
+  "image_distro": "wolfi"
+}
