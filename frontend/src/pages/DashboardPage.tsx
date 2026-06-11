@@ -58,6 +58,31 @@ export default function DashboardPage() {
         <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>刷新</Button>
       </div>
 
+      <div className="ops-overview">
+        <div>
+          <div className="ops-kicker">运行总览</div>
+          <div className="ops-title">作业计划、现场证据与智能判别一体化监控</div>
+        </div>
+        <div className="ops-cells">
+          <div>
+            <span>开工中</span>
+            <strong>{stats?.active_tickets ?? 0}</strong>
+          </div>
+          <div>
+            <span>高风险</span>
+            <strong>{stats?.high_risk_tickets ?? 0}</strong>
+          </div>
+          <div>
+            <span>视频管控率</span>
+            <strong>{Math.round((stats?.video_control_rate ?? 0) * 100)}%</strong>
+          </div>
+          <div>
+            <span>智能判别</span>
+            <strong>已就绪</strong>
+          </div>
+        </div>
+      </div>
+
       <div className="metric-grid dashboard-metrics">
         <div className="metric-tile accent-blue">
           <div className="metric-label">作业票总数</div>

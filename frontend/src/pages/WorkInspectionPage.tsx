@@ -47,7 +47,7 @@ export default function WorkInspectionPage() {
   return (
     <div className="page-stack">
       <div className="page-heading">
-        <h1>作业检查</h1>
+        <h1>作业检查demo</h1>
         <Button icon={<ReloadOutlined />} onClick={() => { refetchTickets(); refetchInspections() }}>刷新</Button>
       </div>
 

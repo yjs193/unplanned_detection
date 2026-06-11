@@ -3,19 +3,39 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pymysql
 
-MYSQL_HOST = os.getenv("MYSQL_HOST", "")
+
+def _load_env_file() -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env_file()
+
+MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_USER = os.getenv("MYSQL_USER", "")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "")
+MYSQL_USER = os.getenv("MYSQL_USER", "health_user")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "health_2024!")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "unplanned_work_inspection")
 MYSQL_CHARSET = "utf8mb4"
-MYSQL_SOCKET = os.getenv("MYSQL_SOCKET", "")
+MYSQL_SOCKET = os.getenv("MYSQL_SOCKET", "/var/run/mysqld/mysqld.sock")
 
 PROJECTS = [
     ("广州南沙220千伏明珠输变电工程", "南沙区明珠湾", ["N1塔", "N3塔", "站区北侧挡土墙", "电缆沟A段"]),
@@ -665,10 +685,14 @@ def _clip(value: Any, max_len: int, fallback: str = "") -> str:
     return text[:max_len]
 
 
-def _parse_datetime(value: Any, fallback: datetime) -> str:
+def _parse_datetime(value: Any, fallback: datetime, default_time: str | None = None) -> str:
     if not value:
         return fallback.strftime("%Y-%m-%d %H:%M:%S")
     raw = str(value).strip().replace("/", "-")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw) and default_time:
+        raw = f"{raw} {default_time}"
+    elif re.fullmatch(r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}", raw):
+        raw = f"{raw}:00"
     for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
         try:
             return datetime.strptime(raw, fmt).strftime("%Y-%m-%d %H:%M:%S")
@@ -688,8 +712,8 @@ def import_parse_record_as_ticket(record: dict[str, Any]) -> dict[str, Any]:
         return {"created": False, "ticket": existing, "message": "该计划编号已在库中，无需重复入库。"}
 
     now_dt = datetime.now()
-    start = _parse_datetime((fact.get("plan_time_range") or {}).get("start"), now_dt)
-    end = _parse_datetime((fact.get("plan_time_range") or {}).get("end"), now_dt + timedelta(hours=4))
+    start = _parse_datetime((fact.get("plan_time_range") or {}).get("start"), now_dt, "00:00:00")
+    end = _parse_datetime((fact.get("plan_time_range") or {}).get("end"), now_dt + timedelta(hours=4), "23:59:59")
     plan_status = fact.get("plan_status") if fact.get("plan_status") in PLAN_STATUS else "待开工"
     execution_status = fact.get("execution_status") or ("现场施工中" if plan_status == "开工中" else "待开工")
     if plan_status == "待开工":

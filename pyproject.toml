@@ -9,8 +9,18 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pymysql>=1.1.0",
     "langgraph>=1.0.0",
+    "langgraph-cli[inmem]>=0.4.27",
+    "pymupdf>=1.24.0",
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+exclude = ["frontend*", "mysql_data*", "mysql_run*", "mysql_logs*"]

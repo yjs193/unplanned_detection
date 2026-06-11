@@ -1,0 +1,402 @@
+{
+  "version": "v0.1",
+  "name": "无计划作业违规检测规则库（合景输变电工程原型版）",
+  "manual_path": "backend/docs/unplanned_violation_detection_guidance.md",
+  "source_stats": {
+    "local_ticket_pdf_count": 134,
+    "parsed_ticket_pdf_count": 134,
+    "ticket_type_count": 11
+  },
+  "general_rules": [
+    {
+      "id": "G01",
+      "name": "无票施工",
+      "severity": "高",
+      "condition": "没有匹配作业票，但现场出现施工人员、机械、动火、开挖、吊装、拆除等明显作业"
+    },
+    {
+      "id": "G02",
+      "name": "状态不符",
+      "severity": "高",
+      "condition": "作业票待开工或已完工，但现场出现施工"
+    },
+    {
+      "id": "G03",
+      "name": "时间不符",
+      "severity": "高",
+      "condition": "现场施工时间早于计划开始或晚于计划结束"
+    },
+    {
+      "id": "G04",
+      "name": "地点不符",
+      "severity": "高",
+      "condition": "画面地点、摄像头点位或视觉场景与票面地点不一致"
+    },
+    {
+      "id": "G05",
+      "name": "作业动作不符",
+      "severity": "高",
+      "condition": "票面为A作业，现场识别为B作业，且B不是A的合理子工序"
+    },
+    {
+      "id": "G06",
+      "name": "设备对象不符",
+      "severity": "高",
+      "condition": "票面对象为主变基础、GIS室、电缆沟等，现场对象为其他设备或无关房建区域"
+    },
+    {
+      "id": "G07",
+      "name": "未授权特殊作业",
+      "severity": "高",
+      "condition": "现场出现动火、吊装、开挖、拆除、带电邻近、高处、深基坑等，票面未包含"
+    },
+    {
+      "id": "G08",
+      "name": "人员规模异常",
+      "severity": "中",
+      "condition": "现场人数明显高于票面或作业类型合理人数，且无法解释为同票相关班组"
+    },
+    {
+      "id": "G09",
+      "name": "机械设备异常",
+      "severity": "高",
+      "condition": "现场出现挖掘机、吊车、泵车、塔吊等大型机械，票面无相应作业"
+    },
+    {
+      "id": "G10",
+      "name": "安全措施缺失",
+      "severity": "中",
+      "condition": "作业内容匹配，但风险控制措施对应的可见证据明显缺失"
+    },
+    {
+      "id": "G11",
+      "name": "同区多作业冲突",
+      "severity": "高",
+      "condition": "同一监控区域同时出现两个互不相关作业，只有一张票覆盖其中一个"
+    },
+    {
+      "id": "G12",
+      "name": "作业阶段错位",
+      "severity": "中",
+      "condition": "票面为准备、收尾或材料进退场，现场却为主体施工或拆除开挖"
+    }
+  ],
+  "work_type_rules": [
+    {
+      "code": "earthwork_excavation",
+      "name": "土方开挖、基坑支护、沟槽开挖与回填",
+      "allowed_visual_evidence": [
+        "挖掘机",
+        "渣土车",
+        "沟槽",
+        "基坑",
+        "支护",
+        "围蔽",
+        "临边护栏",
+        "回填压实"
+      ],
+      "violation_patterns": [
+        "票面为电缆敷设或设备安装，现场出现土方开挖",
+        "票面为回填恢复，现场仍在扩大开挖",
+        "开挖点位不在票面沟道或站区部位"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G09",
+        "G10"
+      ]
+    },
+    {
+      "code": "foundation_construction",
+      "name": "地基与基础、主变基础、GIS基础、电缆沟基础",
+      "allowed_visual_evidence": [
+        "测量放线",
+        "破桩头",
+        "承台",
+        "地梁",
+        "钢筋绑扎",
+        "模板安装",
+        "混凝土浇筑",
+        "预埋件",
+        "回填"
+      ],
+      "violation_patterns": [
+        "票面为主变基础，现场为室内装修或其他无关作业",
+        "票面为钢筋绑扎或支模，现场已进入未授权浇筑阶段",
+        "吊车、泵车、焊机等特殊设备未在票面覆盖"
+      ],
+      "related_general_rules": [
+        "G05",
+        "G06",
+        "G07",
+        "G12"
+      ]
+    },
+    {
+      "code": "rebar_formwork_concrete",
+      "name": "钢筋、模板、高支模与混凝土工程",
+      "allowed_visual_evidence": [
+        "钢筋",
+        "模板",
+        "支撑架体",
+        "泵管",
+        "振捣",
+        "浇筑面",
+        "养护"
+      ],
+      "violation_patterns": [
+        "模板安装票现场进行拆除或浇筑",
+        "普通结构施工现场出现高支模或大面积支撑体系",
+        "混凝土票现场出现未覆盖的焊接切割"
+      ],
+      "related_general_rules": [
+        "G05",
+        "G07",
+        "G10",
+        "G12"
+      ]
+    },
+    {
+      "code": "scaffold_high_work",
+      "name": "脚手架、内外架、高处作业平台",
+      "allowed_visual_evidence": [
+        "脚手架杆件",
+        "扣件",
+        "脚手板",
+        "安全网",
+        "连墙件",
+        "安全带"
+      ],
+      "violation_patterns": [
+        "票面未包含脚手架搭设或拆除，现场出现搭拆",
+        "砌体或抹灰票现场出现外架拆除",
+        "高处作业防护证据缺失"
+      ],
+      "related_general_rules": [
+        "G05",
+        "G07",
+        "G10"
+      ]
+    },
+    {
+      "code": "masonry_decoration",
+      "name": "砌体、抹灰、扇灰、瓷砖铺贴、墙体改造",
+      "allowed_visual_evidence": [
+        "砖块",
+        "砂浆",
+        "砌筑",
+        "抹灰",
+        "墙面处理",
+        "隔墙",
+        "瓷砖"
+      ],
+      "violation_patterns": [
+        "票面为电气安装或主变基础，现场为室内装修",
+        "砌体票现场出现电缆敷设或设备安装",
+        "施工房间或楼层与票面不一致"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G06"
+      ]
+    },
+    {
+      "code": "cable_trench_road_recovery",
+      "name": "路面破除、电缆沟、井、槽盒、盖板、预制件埋设与恢复",
+      "allowed_visual_evidence": [
+        "路面切割",
+        "破除",
+        "沟槽",
+        "井室",
+        "槽盒",
+        "盖板",
+        "预制构件",
+        "围蔽"
+      ],
+      "violation_patterns": [
+        "电缆沟土建票现场进行未授权大面积破路",
+        "回填恢复票现场仍在开凿扩大",
+        "穿墙孔或电缆沟孔洞未在票面出现"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G07",
+        "G12"
+      ]
+    },
+    {
+      "code": "grounding_hot_work",
+      "name": "接地网、接地扁钢、焊接、防腐",
+      "allowed_visual_evidence": [
+        "接地扁钢",
+        "接地线",
+        "焊接",
+        "防腐涂刷",
+        "焊机",
+        "灭火器"
+      ],
+      "violation_patterns": [
+        "票面未包含接地作业，现场出现接地敷设或焊接",
+        "接地票现场出现动火但票面无动火",
+        "焊接点缺少灭火器或隔离证据"
+      ],
+      "related_general_rules": [
+        "G05",
+        "G07",
+        "G10"
+      ]
+    },
+    {
+      "code": "lifting_transformer",
+      "name": "吊装、塔吊、吊车、主变就位和重物转运",
+      "allowed_visual_evidence": [
+        "塔吊",
+        "汽车吊",
+        "吊索具",
+        "起吊物",
+        "警戒区",
+        "指挥人员",
+        "主变就位"
+      ],
+      "violation_patterns": [
+        "票面未包含吊装，现场出现起吊状态",
+        "材料进退场票现场出现重大设备吊装",
+        "起吊对象与票面设备对象不一致"
+      ],
+      "related_general_rules": [
+        "G06",
+        "G07",
+        "G09",
+        "G10"
+      ]
+    },
+    {
+      "code": "primary_equipment_installation",
+      "name": "主变、GIS、高压室、电容器室、配电装置安装",
+      "allowed_visual_evidence": [
+        "主变",
+        "GIS设备",
+        "开关柜",
+        "站用变",
+        "接地变",
+        "电容器组",
+        "屏柜",
+        "母线",
+        "刀闸",
+        "互感器"
+      ],
+      "violation_patterns": [
+        "土建基础票现场出现一次设备安装",
+        "设备安装票现场出现土建拆除或开孔",
+        "设备房间或间隔与票面不一致"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G06",
+        "G07"
+      ]
+    },
+    {
+      "code": "cable_bridge_laying",
+      "name": "电缆支架、桥架、竖井、槽盒、电缆敷设和接线",
+      "allowed_visual_evidence": [
+        "电缆支架",
+        "桥架",
+        "槽盒",
+        "电缆盘",
+        "电缆敷设",
+        "二次接线",
+        "竖井",
+        "屏柜"
+      ],
+      "violation_patterns": [
+        "桥架安装票现场出现土建开挖或动火",
+        "二次电缆票现场出现大型一次电缆牵引",
+        "主控室槽盒票现场位置为电缆层或GIS室"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G06",
+        "G07"
+      ]
+    },
+    {
+      "code": "fire_ventilation_drainage",
+      "name": "防火封堵、消防、通风、排风、防火阀、排油系统",
+      "allowed_visual_evidence": [
+        "防火泥",
+        "防火包",
+        "消防管道",
+        "防火阀",
+        "排风机",
+        "排油检查井",
+        "排油管",
+        "油池"
+      ],
+      "violation_patterns": [
+        "电缆施工票现场进行消防管道迁移或排油系统施工",
+        "防火封堵票现场出现开凿拆墙",
+        "主变油池施工票未覆盖动火或开挖"
+      ],
+      "related_general_rules": [
+        "G05",
+        "G07",
+        "G10"
+      ]
+    },
+    {
+      "code": "secondary_commissioning",
+      "name": "照明、动力、通信、视频监控、自动化、试验调试",
+      "allowed_visual_evidence": [
+        "电缆",
+        "线管",
+        "屏柜",
+        "通信设备",
+        "视频监控设备",
+        "试验仪器",
+        "测试线"
+      ],
+      "violation_patterns": [
+        "照明动力票现场出现一次设备安装或土建开挖",
+        "安装施工票现场进行加压试验或联调",
+        "调试地点或屏柜间隔与票面不一致"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G06",
+        "G07"
+      ]
+    },
+    {
+      "code": "transmission_line",
+      "name": "输电线路、塔基、杆塔组立、架线、附件安装",
+      "allowed_visual_evidence": [
+        "塔基",
+        "杆塔",
+        "抱杆",
+        "导线",
+        "地线",
+        "牵张场",
+        "跨越架",
+        "压接"
+      ],
+      "violation_patterns": [
+        "变电站内作业票现场识别为塔基或架线",
+        "塔基基础票现场进行杆塔组立或架线",
+        "牵张场或跨越架未在票面覆盖"
+      ],
+      "related_general_rules": [
+        "G04",
+        "G05",
+        "G07",
+        "G12"
+      ]
+    }
+  ]
+}

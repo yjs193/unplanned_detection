@@ -1,6 +1,6 @@
 
 import axios from 'axios'
-import type { DashboardData, InspectionRecord, ParseRecord, PilotWorkflowResult, SampleTicket, TicketFact, WorkTicket } from '../types'
+import type { AgentPromptSetting, DashboardData, InspectionRecord, ParseRecord, PilotWorkflowResult, SampleTicket, TicketFact, ViolationDetectionResult, VisionAnalysisResult, VisionBinding, WorkTicket } from '../types'
 
 const api = axios.create({
   baseURL: '/api',
@@ -111,5 +111,30 @@ export const runPilotHj = () => api.post<PilotWorkflowResult>('/pilot/hj/run')
 export const runFullInspection = (payload: { ticket_id?: string; record?: ParseRecord; operator?: string; mode?: string }) =>
   api.post<PilotWorkflowResult>('/inspection/run-full', payload)
 
+export const runViolationDetection = (payload: {
+  ticket_id?: string
+  ticket_task_text?: string
+  video_evidence_text?: string
+  video_evidence_package?: Record<string, any>
+  auto_generate_vision?: boolean
+  probability_threshold?: number
+  enable_second_video_reasoning?: boolean
+  risk_level?: string
+}) => api.post<ViolationDetectionResult>('/violation-detection/run', payload)
+
+export const fetchVisionBindings = (params?: { ticket_id?: string; keyword?: string }) =>
+  api.get<{ total: number; bound_count: number; items: VisionBinding[] }>('/vision/bindings', { params })
+
+export const runVisionAnalysis = (payload: { ticket_id: string; video_filename?: string; frame_count?: number; use_model?: boolean }) =>
+  api.post<VisionAnalysisResult>('/vision/analyze', payload)
+
 export const fetchConversations = () => api.get<{ items: Array<Record<string, any>> }>('/interaction/conversations')
 export const fetchConversationMessages = (conversationId: string) => api.get<{ items: Array<{ role: string; content: string; created_at: string }> }>(`/interaction/conversations/${conversationId}/messages`)
+
+export const fetchAgentPrompts = () => api.get<{ items: AgentPromptSetting[] }>('/settings/agent-prompts')
+export const updateAgentPrompt = (agentId: string, prompt: string) =>
+  api.put<{ success: boolean; item?: AgentPromptSetting; error?: string }>(`/settings/agent-prompts/${agentId}`, { prompt })
+export const resetAgentPrompt = (agentId: string) =>
+  api.post<{ success: boolean; item?: AgentPromptSetting; error?: string }>(`/settings/agent-prompts/${agentId}/reset`)
+export const resetAllAgentPrompts = () =>
+  api.post<{ success: boolean; items: AgentPromptSetting[] }>('/settings/agent-prompts/reset-all')

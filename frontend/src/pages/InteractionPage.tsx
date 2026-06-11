@@ -1,6 +1,6 @@
 
-import { Button, Divider, Input, Select, Space, Table, Tag, message } from 'antd'
-import { SendOutlined, SyncOutlined } from '@ant-design/icons'
+import { Button, Descriptions, Drawer, Input, Select, Space, Table, Tag, message } from 'antd'
+import { FileTextOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -25,6 +25,7 @@ export default function InteractionPage() {
   const [chat, setChat] = useState<ChatItem[]>([{ role: 'assistant', content: '请选择或载入作业票，系统会围绕计划状态、作业地点和自动检查流程给出建议。' }])
   const [conversationId, setConversationId] = useState<string>()
   const [streaming, setStreaming] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false)
 
   useEffect(() => {
     setParseRecord(readLatest())
@@ -60,6 +61,14 @@ export default function InteractionPage() {
   }
 
   const fact = parseRecord?.ticket_fact
+  const contextTags = fact ? (
+    <Space wrap>
+      <Tag color="blue">{fact.plan_id}</Tag>
+      <Tag color={fact.plan_status === '开工中' ? 'cyan' : 'default'}>{fact.plan_status}</Tag>
+      <Tag color="orange">{fact.risk_level}</Tag>
+      <Tag color={fact.video_control_enabled ? 'green' : 'default'}>{fact.video_control_enabled ? '视频管控' : '未纳入视频管控'}</Tag>
+    </Space>
+  ) : null
 
   const send = () => {
     const content = input.trim()
@@ -109,48 +118,50 @@ export default function InteractionPage() {
     <div className="page-stack">
       <div className="page-heading"><h1>系统交互</h1></div>
 
-      <div className="two-col interaction-layout">
-        <div className="panel">
+      <div className="interaction-stack">
+        <div className="panel interaction-context-panel">
           <div className="panel-toolbar">
             <div className="panel-title">作业票上下文</div>
-            <Button icon={<SyncOutlined />} onClick={() => setParseRecord(readLatest())}>最近解析</Button>
+            <Space>
+              {fact && <Button icon={<FileTextOutlined />} onClick={() => setContextOpen(true)}>查看详情</Button>}
+              <Button icon={<SyncOutlined />} onClick={() => setParseRecord(readLatest())}>最近解析</Button>
+            </Space>
           </div>
-          <Divider />
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
-            <Select
-              showSearch
-              loading={isLoading}
-              placeholder="选择作业票"
-              value={sampleId}
-              onChange={loadSample}
-              optionFilterProp="label"
-              options={(sampleData?.samples || []).map((sample) => ({ value: sample.id, label: sample.name }))}
-              style={{ width: '100%' }}
-            />
-            <Button loading={parseMutation.isPending} onClick={() => sampleId && parseMutation.mutate({ sampleId })} disabled={!sampleId}>
-              重新载入作业票
-            </Button>
+          <div className="interaction-context-grid">
+            <div className="interaction-context-controls">
+              <Select
+                showSearch
+                loading={isLoading}
+                placeholder="选择作业票"
+                value={sampleId}
+                onChange={loadSample}
+                optionFilterProp="label"
+                options={(sampleData?.samples || []).map((sample) => ({ value: sample.id, label: sample.name }))}
+                style={{ width: '100%' }}
+              />
+              <Button loading={parseMutation.isPending} onClick={() => sampleId && parseMutation.mutate({ sampleId })} disabled={!sampleId}>
+                重新载入作业票
+              </Button>
+            </div>
             {fact ? (
-              <div className="summary-box">
-                <div className="summary-title">{fact.project_name}</div>
-                <div className="summary-meta">{fact.district || '广州'}｜{fact.work_location}</div>
-                <Space wrap style={{ marginTop: 10 }}>
-                  <Tag color="blue">{fact.plan_id}</Tag>
-                  <Tag color={fact.plan_status === '开工中' ? 'cyan' : 'default'}>{fact.plan_status}</Tag>
-                  <Tag color="orange">{fact.risk_level}</Tag>
-                  <Tag color={fact.video_control_enabled ? 'green' : 'default'}>{fact.video_control_enabled ? '视频管控' : '未纳入视频管控'}</Tag>
-                </Space>
+              <div className="interaction-context-summary">
+                <div>
+                  <div className="summary-title">{fact.project_name}</div>
+                  <div className="summary-meta">{fact.district || '广州'}｜{fact.work_location}</div>
+                </div>
+                {contextTags}
+                <div className="summary-work-content">{fact.work_content_summary || fact.work_content_raw}</div>
               </div>
             ) : (
               <div className="empty-state compact">暂无作业票上下文</div>
             )}
-          </Space>
+          </div>
         </div>
 
         <div className="panel">
           <div className="panel-toolbar">
             <div className="panel-title">智能问答</div>
-            <Tag color={llmStatus?.available ? 'cyan' : 'red'}>{llmStatus?.available ? `${llmStatus.provider} ${llmStatus.model || ''}` : '模型API未配置'}</Tag>
+            <Tag color={llmStatus?.available ? 'cyan' : 'red'}>{llmStatus?.available ? `${llmStatus.provider} ${llmStatus.model || ''}` : '模型接口未配置'}</Tag>
           </div>
 
           <div className="chat-list professional-chat">
@@ -161,10 +172,38 @@ export default function InteractionPage() {
 
           <Space.Compact style={{ width: '100%', marginTop: 12 }}>
             <Input value={input} onChange={(event) => setInput(event.target.value)} onPressEnter={send} placeholder="输入检查问题或处置要求" />
+            <Button icon={<FileTextOutlined />} onClick={() => setContextOpen(true)} disabled={!fact}>上下文</Button>
             <Button type="primary" icon={<SendOutlined />} loading={streaming} onClick={send}>发送</Button>
           </Space.Compact>
         </div>
       </div>
+
+      <Drawer
+        title="作业票上下文"
+        open={contextOpen}
+        onClose={() => setContextOpen(false)}
+        width={680}
+      >
+        {fact ? (
+          <Space direction="vertical" size={14} style={{ width: '100%' }}>
+            {contextTags}
+            <Descriptions bordered size="small" column={1} className="professional-desc">
+              <Descriptions.Item label="项目名称">{fact.project_name}</Descriptions.Item>
+              <Descriptions.Item label="计划编号">{fact.plan_id}</Descriptions.Item>
+              <Descriptions.Item label="作业地点">{fact.work_location}</Descriptions.Item>
+              <Descriptions.Item label="计划时间">{fact.plan_time_range?.start || '待补充'} 至 {fact.plan_time_range?.end || '待补充'}</Descriptions.Item>
+              <Descriptions.Item label="工作负责人">{fact.work_leader || '待补充'}</Descriptions.Item>
+              <Descriptions.Item label="施工单位">{fact.contractor || '待补充'}</Descriptions.Item>
+              <Descriptions.Item label="作业摘要">{fact.work_content_summary || '待生成'}</Descriptions.Item>
+              <Descriptions.Item label="作业内容">{fact.work_content_raw}</Descriptions.Item>
+              <Descriptions.Item label="主要危害">{fact.main_hazards?.join('、') || '待识别'}</Descriptions.Item>
+              <Descriptions.Item label="安全措施">{fact.risk_control_measures?.map((item) => `${item.risk_name}：${item.control_measure}`).join('；') || '待识别'}</Descriptions.Item>
+            </Descriptions>
+          </Space>
+        ) : (
+          <div className="empty-state compact">暂无作业票上下文</div>
+        )}
+      </Drawer>
 
       <div className="panel">
         <div className="panel-title">对话记录</div>

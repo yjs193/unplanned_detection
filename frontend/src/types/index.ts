@@ -139,6 +139,24 @@ export interface SampleTicket {
   ticket?: WorkTicket
 }
 
+export interface AgentPromptSetting {
+  agent_id: string
+  agent_name: string
+  category: string
+  description: string
+  required_output: string
+  variables: string[]
+  tools?: Array<{ name: string; type?: string; purpose?: string }>
+  knowledge_bases?: Array<{ name: string; source?: string; usage?: string }>
+  manuals?: Array<{ title: string; path?: string; summary?: string }>
+  data_sources?: Array<{ name: string; path?: string; status?: string }>
+  default_prompt: string
+  prompt: string
+  is_custom: boolean
+  updated_at: string
+  prompt_length: number
+}
+
 export interface SiteMediaFrame {
   media_id: string
   media_type: string
@@ -155,6 +173,42 @@ export interface SiteMediaFrame {
   source_title?: string
   dedupe_key?: string
   display_label?: string
+}
+
+export interface VisionBinding {
+  project_label: string
+  workbook: string
+  ticket_no: string
+  weekly_plan: string
+  ticket_name: string
+  plan_time_range: string
+  execution_status: string
+  risk_level: string
+  task_category: string
+  task_name: string
+  site_leader: string
+  matched: boolean
+  video_count: number
+  videos: Array<{ filename: string; weekly_plan: string; camera_id: string; start_token: string; end_token: string; size_mb: number; url: string }>
+}
+
+export interface VisionAnalysisResult {
+  success: boolean
+  error?: string
+  analysis_id?: string
+  source?: string
+  model_name?: string
+  fallback_reason?: string
+  final_decision_allowed?: boolean
+  output_boundary?: string
+  ticket_summary?: Partial<WorkTicket>
+  binding?: VisionBinding | null
+  video?: { filename: string; weekly_plan: string; camera_id: string; start_token: string; end_token: string; size_mb: number; url: string } | null
+  frame_count: number
+  frames: Array<{ frame_index: number; display_label: string; image_url: string; evidence_text: string; facts?: Array<Record<string, any>> }>
+  aggregates: Record<string, any>
+  evidence_text: string
+  media_manifest: SiteMediaFrame[]
 }
 
 export interface InspectionRecord {
@@ -228,4 +282,44 @@ export interface PilotWorkflowResult {
   }
   inspection: InspectionRecord & { vision_result?: Record<string, any>; violation_result?: Record<string, any> }
   data_sources: Array<{ title: string; source_page: string; filename: string }>
+}
+
+export interface ViolationDetectionResult {
+  success: boolean
+  match_id?: string
+  created_at?: string
+  provider?: string
+  model?: string
+  llm_used?: boolean
+  risk_level?: string
+  token_probability?: number | null
+  avg_token_probability?: number | null
+  token_probability_count?: number | null
+  token_probability_available?: boolean
+  probability_threshold?: number
+  probability_thresholds?: Record<string, any>
+  result?: {
+    match_result: string
+    task_match_score: number
+    matched_work: string[]
+    unmatched_work: Array<{ ticket_side: string; video_side: string; evidence: string; confidence: number }>
+    need_second_video_reasoning: boolean
+    reason: string
+  }
+  first_pass?: Record<string, any>
+  second_pass?: Record<string, any>
+  final_decision_source?: string
+  result_conflict?: boolean
+  manual_review_required?: boolean
+  auto_flow_stopped?: boolean
+  manual_review_reason?: string
+  review_trace?: Record<string, any>
+  metrics?: Record<string, any>
+  ticket_summary?: Partial<WorkTicket> | null
+  ticket_task_text?: string
+  video_evidence_text?: string
+  evidence_source?: string
+  vision_result?: VisionAnalysisResult
+  capability_scope?: string
+  error?: string
 }

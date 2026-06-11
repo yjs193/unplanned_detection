@@ -31,10 +31,20 @@ from .db import (
     save_inspection,
     save_parse_record,
 )
+from .integrations.camera_client import CameraClient
+from .integrations.vision_client import VisionClient
+from .matching_agent import build_ticket_task_text, run_task_video_matching
 from .sample_data import SAMPLE_TICKETS
 from .model_api import call_chat, call_chat_stream, public_model_status
 from .ocr import extract_text_from_image
 from .pdf_ticket import extract_text_from_pdf
+from .prompt_settings import list_agent_prompts, reset_agent_prompt, reset_all_agent_prompts, update_agent_prompt, get_agent_prompt
+from .vision_service import (
+    VIDEO_DIR,
+    VISION_FRAME_DIR,
+    analyze_ticket_video,
+    list_vision_bindings,
+)
 
 
 app = FastAPI(title="无计划作业智能检查平台 API", version="0.3.0")
@@ -75,6 +85,28 @@ class FullInspectionRequest(BaseModel):
     record: dict[str, Any] | None = None
     operator: str = "系统自动检查"
     mode: str = "full_closed_loop"
+
+
+class ViolationDetectionRequest(BaseModel):
+    ticket_id: str | None = None
+    ticket_task_text: str | None = None
+    video_evidence_text: str = ""
+    video_evidence_package: dict[str, Any] | None = None
+    auto_generate_vision: bool = False
+    probability_threshold: float = 0.35
+    enable_second_video_reasoning: bool = True
+    risk_level: str | None = None
+
+
+class VisionAnalyzeRequest(BaseModel):
+    ticket_id: str
+    video_filename: str | None = None
+    frame_count: int = 8
+    use_model: bool = True
+
+
+class AgentPromptUpdateRequest(BaseModel):
+    prompt: str
 
 
 @app.on_event("startup")
@@ -126,6 +158,26 @@ def pilot_frame_media(filename: str) -> FileResponse:
     return FileResponse(path)
 
 
+@app.get("/api/media/vedio/{filename}")
+def local_video_media(filename: str) -> FileResponse:
+    safe_name = Path(filename).name
+    path = VIDEO_DIR / safe_name
+    if not path.exists():
+        files = sorted(VIDEO_DIR.glob("*.mp4")) if VIDEO_DIR.exists() else []
+        path = files[0] if files else VIDEO_DIR / "missing.mp4"
+    return FileResponse(path)
+
+
+@app.get("/api/media/vision-frame/{filename}")
+def vision_frame_media(filename: str) -> FileResponse:
+    safe_name = Path(filename).name
+    path = VISION_FRAME_DIR / safe_name
+    if not path.exists():
+        files = sorted(VISION_FRAME_DIR.glob("*.jpg")) if VISION_FRAME_DIR.exists() else []
+        path = files[0] if files else PILOT_IMAGE_DIR / "pilot_001.jpg"
+    return FileResponse(path)
+
+
 @app.get("/api/dashboard")
 def dashboard() -> dict[str, Any]:
     return dashboard_data()
@@ -144,7 +196,7 @@ def work_tickets(
 
 @app.get("/api/work-tickets/samples")
 def samples() -> dict[str, Any]:
-    tickets = list_tickets(limit=120)["items"]
+    tickets = list_tickets(limit=300)["items"]
     return {
         "samples": [
             {
@@ -162,6 +214,121 @@ def samples() -> dict[str, Any]:
 @app.get("/api/work-tickets/history")
 def parse_history() -> dict[str, Any]:
     return {"items": list_parse_records(20)}
+
+
+def _ticket_task_text(ticket: dict[str, Any] | None, override: str | None = None) -> str:
+    explicit = (override or "").strip()
+    if explicit:
+        return explicit
+    if not ticket:
+        return ""
+    fact = deepcopy(ticket.get("ticket_fact") or {})
+    if ticket.get("work_content_raw") and not fact.get("work_content_raw"):
+        fact["work_content_raw"] = ticket.get("work_content_raw")
+    return build_ticket_task_text(fact) or str(ticket.get("work_content_raw") or "").strip()
+
+
+def _evidence_text(payload: ViolationDetectionRequest) -> tuple[str, str]:
+    text = (payload.video_evidence_text or "").strip()
+    if text:
+        return text, "现场证据链文本"
+    if payload.video_evidence_package:
+        return json.dumps(payload.video_evidence_package, ensure_ascii=False), "现场证据包"
+    return "", ""
+
+
+def _auto_vision_evidence(ticket: dict[str, Any] | None, payload: ViolationDetectionRequest) -> tuple[str, str, dict[str, Any] | None]:
+    if not payload.auto_generate_vision or not ticket:
+        return "", "", None
+    vision_result = analyze_ticket_video(ticket, frame_count=8, use_model=False)
+    evidence = (vision_result.get("evidence_text") or "").strip()
+    if evidence:
+        return evidence, "视觉理解自动生成证据链", vision_result
+    return "", "", vision_result
+
+
+def _ticket_risk_level(ticket: dict[str, Any] | None, override: str | None = None) -> str | None:
+    if override:
+        return override
+    if not ticket:
+        return None
+    fact = ticket.get("ticket_fact") or {}
+    risk_value = fact.get("risk_level") or fact.get("risk_judgement") or ticket.get("risk_level")
+    if isinstance(risk_value, dict):
+        risk_value = risk_value.get("level") or risk_value.get("risk_level") or risk_value.get("severity")
+    return str(risk_value) if risk_value else None
+
+
+def _ticket_summary(ticket: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not ticket:
+        return None
+    return {
+        "id": ticket.get("id"),
+        "plan_id": ticket.get("plan_id"),
+        "ticket_no": ticket.get("ticket_no"),
+        "ticket_title": ticket.get("ticket_title"),
+        "project_name": ticket.get("project_name"),
+        "district": ticket.get("district"),
+        "work_location": ticket.get("work_location"),
+        "work_content_raw": ticket.get("work_content_raw"),
+        "plan_status": ticket.get("plan_status"),
+        "execution_status": ticket.get("execution_status"),
+        "risk_level": ticket.get("risk_level"),
+        "video_control_enabled": bool(ticket.get("video_control_enabled")),
+    }
+
+
+@app.post("/api/violation-detection/run")
+def run_violation_detection(payload: ViolationDetectionRequest) -> dict[str, Any]:
+    ticket = get_ticket(payload.ticket_id) if payload.ticket_id else None
+    if payload.ticket_id and not ticket and not (payload.ticket_task_text or "").strip():
+        return {"success": False, "error": f"未找到作业票：{payload.ticket_id}，请重新选择作业票或直接输入票面任务文本。"}
+
+    ticket_task_text = _ticket_task_text(ticket, payload.ticket_task_text)
+    video_evidence_text, evidence_source = _evidence_text(payload)
+    auto_vision_result = None
+    if not video_evidence_text:
+        video_evidence_text, evidence_source, auto_vision_result = _auto_vision_evidence(ticket, payload)
+    if not ticket_task_text:
+        return {"success": False, "error": "缺少作业票任务文本，无法执行违规检测。"}
+    if not video_evidence_text:
+        return {"success": False, "error": "缺少现场证据链文本。当前视觉理解尚未接入，请先输入或生成现场证据链后再检测。"}
+
+    result = run_task_video_matching(
+        ticket_task_text=ticket_task_text,
+        video_evidence_text=video_evidence_text,
+        ticket_id=payload.ticket_id,
+        probability_threshold=payload.probability_threshold,
+        enable_second_video_reasoning=payload.enable_second_video_reasoning,
+        risk_level=_ticket_risk_level(ticket, payload.risk_level),
+    )
+    result["ticket_summary"] = _ticket_summary(ticket)
+    result["ticket_task_text"] = ticket_task_text
+    result["video_evidence_text"] = video_evidence_text
+    result["evidence_source"] = evidence_source
+    if auto_vision_result:
+        result["vision_result"] = auto_vision_result
+    result["capability_scope"] = "当前版本完成作业票允许工作内容与现场证据链工作内容的匹配判别；时间、地点、人员和安全措施维度等待视觉理解证据包接入后扩展。"
+    return result
+
+
+@app.get("/api/vision/bindings")
+def vision_bindings(ticket_id: str | None = "", keyword: str | None = "") -> dict[str, Any]:
+    ticket = get_ticket(ticket_id) if ticket_id else None
+    return list_vision_bindings(ticket=ticket, keyword=keyword or None)
+
+
+@app.post("/api/vision/analyze")
+def vision_analyze(payload: VisionAnalyzeRequest) -> dict[str, Any]:
+    ticket = get_ticket(payload.ticket_id)
+    if not ticket:
+        return {"success": False, "error": f"未找到作业票：{payload.ticket_id}"}
+    return analyze_ticket_video(
+        ticket=ticket,
+        video_filename=payload.video_filename,
+        frame_count=payload.frame_count,
+        use_model=payload.use_model,
+    )
 
 
 def _sse(data: dict[str, Any]) -> str:
@@ -230,14 +397,7 @@ def _llm_ticket_analysis(ticket_fact: dict[str, Any], validation_result: dict[st
     messages = [
         {
             "role": "system",
-            "content": (
-                "你是南方电网基建现场无计划作业检查平台的作业票入库分析智能体。"
-                "只能根据作业票票面信息做计划侧理解，不允许声称已经看到现场。"
-                "输出严格 JSON，不要 Markdown。JSON 字段必须包含："
-                "agent_report、key_findings、work_content_understanding、vision_checklist、"
-                "matching_rules、violation_detection_rules、media_binding_requirements、risk_judgement、dispatch_suggestion。"
-                "vision_checklist 要写成后续视觉模型需要识别的对象、人员、机械、区域、动作和安全措施。"
-            ),
+            "content": get_agent_prompt("ticket_analysis_agent"),
         },
         {
             "role": "user",
@@ -609,8 +769,8 @@ def _ensure_ticket_for_full_inspection(payload: FullInspectionRequest) -> tuple[
 
 
 def _run_full_inspection(ticket: dict[str, Any], parse_record: dict[str, Any], created: bool, project_name: str | None = None) -> dict[str, Any]:
-    frames = _build_pilot_frames(ticket)
-    vision = _pilot_visual_understanding(frames, ticket)
+    frames = CameraClient().get_recent_frames(ticket, fallback_builder=_build_pilot_frames, window_minutes=30, interval_minutes=1)
+    vision = VisionClient().analyze_site_evidence(frames, ticket, fallback_analyzer=_pilot_visual_understanding)
     detection = _pilot_violation_detection(ticket, vision)
     inspection = _save_pilot_inspection(ticket, frames, vision, detection)
     return {
@@ -1051,8 +1211,8 @@ def _save_pilot_inspection(ticket: dict[str, Any], frames: list[dict[str, Any]],
         "id": f"pilot_{uuid.uuid4().hex[:8]}",
         "ticket_id": ticket.get("id"),
         "created_at": now,
-        "operator": "合景在线试点",
-        "mode": "pilot_closed_loop",
+        "operator": "系统自动检查",
+        "mode": "closed_loop",
         "ticket": ticket.get("plan_id"),
         "location": ticket.get("work_location"),
         "status": "发现异常" if detection.get("risk_level") in {"高", "中"} else "自动通过",
@@ -1072,7 +1232,7 @@ def _save_pilot_inspection(ticket: dict[str, Any], frames: list[dict[str, Any]],
         "timeline": [
             {"time": datetime.now().strftime("%H:%M:%S"), "event": "作业票解析并入库"},
             {"time": datetime.now().strftime("%H:%M:%S"), "event": f"绑定现场图片{len(frames)}张"},
-            {"time": datetime.now().strftime("%H:%M:%S"), "event": "完成视觉理解模拟"},
+            {"time": datetime.now().strftime("%H:%M:%S"), "event": "完成现场视觉理解"},
             {"time": datetime.now().strftime("%H:%M:%S"), "event": f"完成违规检测：{detection.get('conclusion')}"},
         ],
     }
@@ -1282,6 +1442,34 @@ def llm_status() -> dict[str, Any]:
     return public_model_status()
 
 
+@app.get("/api/settings/agent-prompts")
+def agent_prompts() -> dict[str, Any]:
+    return {"items": list_agent_prompts()}
+
+
+@app.put("/api/settings/agent-prompts/{agent_id}")
+def save_agent_prompt(agent_id: str, payload: AgentPromptUpdateRequest) -> dict[str, Any]:
+    try:
+        return {"success": True, "item": update_agent_prompt(agent_id, payload.prompt)}
+    except KeyError:
+        return {"success": False, "error": "未找到该智能体提示语配置。"}
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/api/settings/agent-prompts/{agent_id}/reset")
+def restore_agent_prompt(agent_id: str) -> dict[str, Any]:
+    try:
+        return {"success": True, "item": reset_agent_prompt(agent_id)}
+    except KeyError:
+        return {"success": False, "error": "未找到该智能体提示语配置。"}
+
+
+@app.post("/api/settings/agent-prompts/reset-all")
+def restore_all_agent_prompts() -> dict[str, Any]:
+    return {"success": True, "items": reset_all_agent_prompts()}
+
+
 @app.get("/api/interaction/conversations")
 def conversations() -> dict[str, Any]:
     return {"items": list_conversations(30)}
@@ -1298,20 +1486,36 @@ def _chat_messages(message: str, fact: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
-            "content": (
-                "你是无计划作业智能检查平台的系统交互智能体。"
-                "你必须只用中文回答，输出 Markdown，但不要输出 Markdown 表格。"
-                "平台当前阶段重点是作业票解析、作业检查发起、现场监控画面调取和计划-现场一致性比对。"
-                "无计划作业不是作业票字段本身，而是现场画面识别结果与作业票计划在时间、地点、人员数量、作业内容、作业状态上的不一致。"
-                "当前只有计划状态为“开工中”的作业票会触发自动作业检查。"
-                "回答要结合给定作业票事实，避免泛泛而谈；不要提具体模型厂商；不要出现人工复核字样。"
-            ),
+            "content": get_agent_prompt("interaction_agent"),
         },
         {
             "role": "user",
             "content": f"作业票事实JSON：{ticket_context}\n\n用户问题：{message}",
         },
     ]
+
+
+def _compact_markdown_answer(text: str) -> str:
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = []
+    previous_blank = False
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            if not previous_blank:
+                lines.append("")
+            previous_blank = True
+            continue
+        lines.append(line.strip())
+        previous_blank = False
+    compacted = "\n".join(lines).strip()
+    compacted = re.sub(r"\n{3,}", "\n\n", compacted)
+    list_gap_pattern = r"(?m)^(\s*(?:[-*+]|\d+[.)])\s+[^\n]+)\n\n(?=\s*(?:[-*+]|\d+[.)])\s+)"
+    previous = None
+    while previous != compacted:
+        previous = compacted
+        compacted = re.sub(list_gap_pattern, r"\1\n", compacted)
+    return compacted
 
 
 def _fallback_answer(message: str, fact: dict[str, Any], error: str) -> str:
@@ -1347,7 +1551,7 @@ def interaction_chat_stream(payload: ChatRequest) -> StreamingResponse:
         for event in call_chat_stream(messages, temperature=0.2, timeout=90):
             if not event.get("ok"):
                 yielded_error = True
-                answer = _fallback_answer(message, fact, event.get("error", "模型 API 调用失败"))
+                answer = _compact_markdown_answer(_fallback_answer(message, fact, event.get("error", "模型 API 调用失败")))
                 save_chat_message(conversation_id, "assistant", answer, {"provider": provider.get("provider"), "model": provider.get("model"), "success": False, "error": event.get("error")})
                 yield _sse({"type": "error", "message": event.get("error", "模型 API 调用失败")})
                 yield _sse({"type": "final", "conversation_id": conversation_id, "answer": answer, "provider": provider.get("provider"), "model": provider.get("model")})
@@ -1358,7 +1562,7 @@ def interaction_chat_stream(payload: ChatRequest) -> StreamingResponse:
             chunks.append(content)
             yield _sse({"type": "delta", "content": content, "provider": event.get("provider"), "model": event.get("model")})
         if not yielded_error:
-            answer = "".join(chunks).strip()
+            answer = _compact_markdown_answer("".join(chunks))
             save_chat_message(conversation_id, "assistant", answer, {"provider": provider.get("provider"), "model": provider.get("model"), "success": True})
             yield _sse({"type": "final", "conversation_id": conversation_id, "answer": answer, "provider": provider.get("provider"), "model": provider.get("model")})
         yield _sse({"type": "done"})
@@ -1376,10 +1580,10 @@ def interaction_chat(payload: ChatRequest) -> dict[str, Any]:
     provider = public_model_status()
     result = call_chat(_chat_messages(message, fact), temperature=0.2, timeout=60)
     if not result.get("ok"):
-        answer = _fallback_answer(message, fact, result.get("error", "模型 API 调用失败"))
+        answer = _compact_markdown_answer(_fallback_answer(message, fact, result.get("error", "模型 API 调用失败")))
         save_chat_message(conversation_id, "assistant", answer, {"provider": provider.get("provider"), "model": provider.get("model"), "success": False, "error": result.get("error")})
         return {"success": False, "provider": provider.get("provider"), "model": provider.get("model"), "conversation_id": conversation_id, "answer": answer, "suggested_actions": ["检查模型 API 配置", "确认服务器网络可访问模型服务"]}
-    answer = result.get("content", "")
+    answer = _compact_markdown_answer(result.get("content", ""))
     save_chat_message(conversation_id, "assistant", answer, {"provider": result.get("provider"), "model": result.get("model"), "success": True})
     return {
         "success": True,

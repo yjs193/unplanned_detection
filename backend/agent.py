@@ -142,18 +142,28 @@ def _extract_time_range(text: str) -> dict[str, str]:
         r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?\s+\d{1,2}:\d{2})\s*(?:至|~|-)\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?\s+\d{1,2}:\d{2})",
         r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?)\s*(?:至|~|-)\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?)",
     ]
-    for pattern in patterns:
+    for index, pattern in enumerate(patterns):
         match = re.search(pattern, text)
         if match:
-            return {"start": _normalize_dt(match.group(1)), "end": _normalize_dt(match.group(2))}
+            if index == 0:
+                return {"start": _normalize_dt(match.group(1)), "end": _normalize_dt(match.group(2))}
+            return {
+                "start": _normalize_dt(match.group(1), "00:00:00"),
+                "end": _normalize_dt(match.group(2), "23:59:59"),
+            }
     return {"start": "", "end": ""}
 
 
-def _normalize_dt(value: str) -> str:
+def _normalize_dt(value: str, default_time: str | None = None) -> str:
     cleaned = value.replace("年", "-").replace("月", "-").replace("日", "").replace("/", "-")
     cleaned = re.sub(r"-(\d)(?=-)", r"-0\1", cleaned)
     cleaned = re.sub(r"-(\d)(\s|$)", r"-0\1\2", cleaned)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", cleaned) and default_time:
+        return f"{cleaned} {default_time}"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}", cleaned):
+        return f"{cleaned}:00"
+    return cleaned
 
 
 def _extract_work_scope(text: str) -> list[str]:
@@ -707,7 +717,14 @@ def field_extract(state: ParseState) -> ParseState:
 
     plan_start = _field(text, ["计划开始时间"])
     plan_end = _field(text, ["计划结束时间"])
-    time_range = {"start": _normalize_dt(plan_start), "end": _normalize_dt(plan_end)} if plan_start or plan_end else _extract_time_range(text)
+    time_range = (
+        {
+            "start": _normalize_dt(plan_start, "00:00:00"),
+            "end": _normalize_dt(plan_end, "23:59:59"),
+        }
+        if plan_start or plan_end
+        else _extract_time_range(text)
+    )
     work_content = _extract_work_content(text) or _field(text, ["巡查问题"])
     work_intel = _extract_work_content_intelligence(work_content)
     work_location = _field(text, ["工作地点", "作业地点", "施工地点"]) or ("L13塔附近挡土墙" if "L13" in text else "")

@@ -28,13 +28,13 @@ def load_env_files() -> None:
 
 load_env_files()
 
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
-MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL") or os.getenv("MINIMAX_API_HOST") or "https://api.minimax.io/v1"
-MINIMAX_MODEL = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+QWEN_API_KEY = os.getenv("META_API_KEY") or os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY", "")
+QWEN_BASE_URL = os.getenv("META_BASE_URL") or os.getenv("QWEN_BASE_URL", "")
+QWEN_MODEL = os.getenv("META_MODEL_NAME") or os.getenv("QWEN_MODEL", "qwen-plus-latest")
 
 
 def _chat_url() -> str:
-    base = MINIMAX_BASE_URL.rstrip("/")
+    base = QWEN_BASE_URL.rstrip("/")
     if base.endswith("/chat/completions"):
         return base
     if base.endswith("/v1"):
@@ -43,26 +43,26 @@ def _chat_url() -> str:
 
 
 def minimax_available() -> bool:
-    return bool(MINIMAX_API_KEY)
+    return bool(QWEN_API_KEY)
 
 
 def call_minimax(messages: list[dict[str, str]], temperature: float = 0.2, timeout: int = 45) -> dict[str, Any]:
-    if not MINIMAX_API_KEY:
-        return {"ok": False, "content": "", "error": "未配置 MINIMAX_API_KEY"}
+    if not QWEN_API_KEY:
+        return {"ok": False, "content": "", "error": "未配置 META_API_KEY、QWEN_API_KEY 或 DASHSCOPE_API_KEY"}
     try:
         resp = requests.post(
             _chat_url(),
-            headers={"Authorization": f"Bearer {MINIMAX_API_KEY}", "Content-Type": "application/json"},
-            json={"model": MINIMAX_MODEL, "messages": messages, "temperature": temperature},
+            headers={"Authorization": f"Bearer {QWEN_API_KEY}", "Content-Type": "application/json"},
+            json={"model": QWEN_MODEL, "messages": messages, "temperature": temperature},
             timeout=timeout,
         )
         if resp.status_code >= 400:
-            return {"ok": False, "content": "", "error": f"Minimax API HTTP {resp.status_code}: {resp.text[:300]}"}
+            return {"ok": False, "content": "", "error": f"Qwen API HTTP {resp.status_code}: {resp.text[:300]}"}
         payload = resp.json()
         content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return {"ok": True, "content": content, "raw": payload}
+        return {"ok": True, "content": content, "provider": "Qwen", "model": QWEN_MODEL, "raw": payload}
     except Exception as exc:
-        return {"ok": False, "content": "", "error": f"Minimax API 调用失败：{exc}"}
+        return {"ok": False, "content": "", "error": f"Qwen API 调用失败：{exc}"}
 
 
 def extract_json_object(text: str) -> dict[str, Any] | None:
@@ -116,16 +116,16 @@ def build_agent_analysis(ticket_fact: dict[str, Any], validation_result: dict[st
         {"role": "user", "content": prompt},
     ], temperature=0.1, timeout=35)
     if not result["ok"]:
-        base["model_provider"] = "rules_minimax_failed"
+        base["model_provider"] = "rules_qwen_failed"
         base["llm_error"] = result["error"]
         return base
     parsed = extract_json_object(result["content"])
     if not parsed:
-        base["model_provider"] = "minimax_text"
+        base["model_provider"] = "qwen_text"
         base["key_findings"] = [result["content"][:500]]
         return base
     base.update({k: parsed[k] for k in ["risk_judgement", "key_findings", "dispatch_suggestion", "review_required"] if k in parsed})
-    base["model_provider"] = "minimax"
+    base["model_provider"] = "qwen"
     return base
 
 
@@ -138,19 +138,19 @@ def clean_minimax_answer(content: str) -> str:
 
 
 def call_minimax_stream(messages: list[dict[str, str]], temperature: float = 0.2, timeout: int = 60):
-    if not MINIMAX_API_KEY:
-        yield {"ok": False, "content": "", "error": "未配置 MINIMAX_API_KEY"}
+    if not QWEN_API_KEY:
+        yield {"ok": False, "content": "", "error": "未配置 META_API_KEY、QWEN_API_KEY 或 DASHSCOPE_API_KEY"}
         return
     try:
         resp = requests.post(
             _chat_url(),
-            headers={"Authorization": f"Bearer {MINIMAX_API_KEY}", "Content-Type": "application/json"},
-            json={"model": MINIMAX_MODEL, "messages": messages, "temperature": temperature, "stream": True},
+            headers={"Authorization": f"Bearer {QWEN_API_KEY}", "Content-Type": "application/json"},
+            json={"model": QWEN_MODEL, "messages": messages, "temperature": temperature, "stream": True},
             timeout=timeout,
             stream=True,
         )
         if resp.status_code >= 400:
-            yield {"ok": False, "content": "", "error": f"Minimax API HTTP {resp.status_code}: {resp.text[:300]}"}
+            yield {"ok": False, "content": "", "error": f"Qwen API HTTP {resp.status_code}: {resp.text[:300]}"}
             return
         for line in resp.iter_lines():
             if not line:
@@ -168,6 +168,6 @@ def call_minimax_stream(messages: list[dict[str, str]], temperature: float = 0.2
             delta = data.get("choices", [{}])[0].get("delta", {})
             content = delta.get("content") or data.get("choices", [{}])[0].get("message", {}).get("content", "")
             if content:
-                yield {"ok": True, "content": content}
+                yield {"ok": True, "content": content, "provider": "Qwen", "model": QWEN_MODEL}
     except Exception as exc:
-        yield {"ok": False, "content": "", "error": f"Minimax API 调用失败：{exc}"}
+        yield {"ok": False, "content": "", "error": f"Qwen API 调用失败：{exc}"}

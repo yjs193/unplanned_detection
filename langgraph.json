@@ -2,7 +2,9 @@
   "$schema": "https://langgra.ph/schema.json",
   "dependencies": ["."],
   "graphs": {
-    "work_ticket_parse_agent": "backend.agent:GRAPH"
+    "work_ticket_parse_agent": "backend.agent:GRAPH",
+    "violation_detection_agent": "backend.smith_graphs:VIOLATION_DETECTION_GRAPH",
+    "unplanned_work_inspection_workflow": "backend.smith_graphs:INSPECTION_WORKFLOW_GRAPH"
   },
   "env": ".env",
   "image_distro": "wolfi"
